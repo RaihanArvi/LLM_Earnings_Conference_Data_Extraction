@@ -1,0 +1,5 @@
+# Configuration file template
+# Copy this file to config.yaml and add your actual API key
+
+api_key: 'your-api-key-here'
+
