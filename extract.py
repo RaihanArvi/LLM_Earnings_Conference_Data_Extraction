@@ -553,7 +553,7 @@ async def run_all(df):
         else:
             df.at[idx, "excerpt_att_extraction_json"] = None
 
-        if completed_count % 100 == 0:
+        if completed_count % 500 == 0:
             output_filename = time_now.strftime("processed_transcripts_%Y%m%d_%H%M%S.csv")
             output_path = f"output/{output_filename}"
             df.to_csv(output_path, index=False)
@@ -572,7 +572,7 @@ async def run_all(df):
 # ----------------------------
 def load_dataframe(filename: str) -> pd.DataFrame:
     df = pd.read_csv(filename)
-    df = df.iloc[0:1500]
+    df = df.iloc[0:100]
 
     processed_df = df.copy()
     cols = [
