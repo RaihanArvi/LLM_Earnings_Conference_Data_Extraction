@@ -69,15 +69,6 @@ class Excerpt(BaseModel):
     paragraph_text: str = Field(
         ..., description="Verbatim paragraph from the transcript"
     )
-    speaker: str = Field(
-        ..., description="Speaker role, e.g., CEO, CFO, Analyst, Unknown"
-    )
-    section: Optional[str] = Field(
-        ..., description="Prepared Remarks, Q&A, or null"
-    )
-    timestamp: Optional[str] = Field(
-        ..., description="Timestamp like HH:MM:SS or null"
-    )
     raw_keywords_detected: List[str] = Field(
         ...,
         description="List of detected key terms or vendor names"
@@ -104,6 +95,10 @@ class LLMAnnotation(BaseModel):
         default=None,
         description="Indicates whether the content relates to data or AI"
     )
+    is_att: Optional[int] = Field(
+        default=None,
+        description="Indicates whether the content relates to data or AI"
+    )
     representative_quotes: Optional[str] = Field(
         default=None,
         description="Representative verbatim quotes supporting the classification"
@@ -120,7 +115,10 @@ class LLMAnnotation(BaseModel):
         default=None,
         description="Extracted excerpt from the transcript"
     )
-
+    excerpt_att_extraction: Optional[Excerpt] = Field(
+        default=None,
+        description="Extracted excerpt from the transcript"
+    )
 
 
 # ----------------------------
@@ -161,14 +159,14 @@ Passage:
 async def detect_sdk_or_data(passage: str) -> int:
     prompt = f"""You are a classifier. Read the following passage and determine the passage is relevant. Refer to the guidelines below for relevancy.
 
-## 1. What counts as “relevant” (keywords and concepts)
+## What counts as “relevant” (keywords and concepts)
 
 Treat a paragraph as relevant if it clearly discusses any of the topics below. Use both exact
 matches and close paraphrases.
 
 ---
 
-### A. SDK / Data Infrastructure Concepts
+### SDK / Data Infrastructure Concepts
 
 Include both generic concepts and specific vendor/SDK names.
 
@@ -197,7 +195,43 @@ Mark a paragraph as relevant if it describes:
 
 ---
 
-### B. ATT / IDFA / iOS Privacy Shock Concepts
+Respond with ONLY a single number:
+- 1 if the passage is relevant.
+- 0 if it is not relevant.
+
+Passage:
+\"\"\"{passage}\"\"\"
+    """
+
+    response = await client.responses.create(
+        model="gpt-5-mini",
+        instructions="You are a strict binary classifier.",
+        reasoning={"effort": "medium"},
+        text={"verbosity": "high"},
+        input=[
+            {"role": "user", "content": prompt}
+        ]
+    )
+
+    try:
+        result = int(response.output_text)
+        return 1 if result == 1 else 0
+    except:
+        return 0
+
+
+@async_retry()
+async def detect_att(passage: str) -> int:
+    prompt = f"""You are a classifier. Read the following passage and determine the passage is relevant. Refer to the guidelines below for relevancy.
+
+## What counts as “relevant” (keywords and concepts)
+
+Treat a paragraph as relevant if it clearly discusses any of the topics below. Use both exact
+matches and close paraphrases.
+
+---
+
+### ATT / IDFA / iOS Privacy Shock Concepts
 
 Look for explicit or implicit references to Apple’s privacy changes.
 
@@ -317,7 +351,7 @@ Be precise and consistent. Do not infer information that is not explicitly or cl
     user_prompt = textwrap.dedent(
         f"""For each extracted paragraph, assign one or more of the following labels (multi-label is allowed):
 
-Use these exact words for label: ["SDK/Data Infrastructure Reliance", "Third-Party Data Dependency", "ATT Impact – Direct (Signal/Measurement)", "ATT Impact – Financial"]
+Use these exact words for label: ["SDK/Data Infrastructure Reliance", "Third-Party Data Dependency"]
 
 ### 1. SDK/Data Infrastructure Reliance
 Use when the paragraph discusses:
@@ -330,23 +364,6 @@ Use when the paragraph emphasizes dependence on:
 - external partners, measurement vendors, ad networks, DSPs;
 - “third-party data signals,” “third-party measurement,” “partner APIs,” external data feeds, or aggregated data provided by partners.
 
-### 3. ATT Impact – Direct (Signal/Measurement)
-Use when the paragraph links ATT/IDFA/iOS privacy changes to:
-- reduced accuracy of measurement or targeting,
-- “signal loss,” fewer attribution signals,
-- inability to track or attribute users/campaigns,
-- degraded optimization, difficulties in campaign performance measurement.
-
-This label focuses on information / measurement / optimization consequences.
-
-### 4. ATT Impact – Financial
-Use when the paragraph links ATT/IDFA/iOS privacy changes to financial outcomes, e.g.:
-- lower ad revenue, weaker ROAS, higher customer acquisition cost,
-- missed guidance or forecast revisions,
-- explicit revenue or profit shortfalls attributed to privacy changes.
-
-This label focuses on earnings, revenue, margins, or guidance effects.
-
 If a paragraph is clearly relevant but doesn’t fit any of these, you may assign no label (empty list), but that should be rare. Prefer to use all applicable labels.
 
 ---
@@ -354,11 +371,7 @@ If a paragraph is clearly relevant but doesn’t fit any of these, you may assig
 ## 3. How to segment and capture metadata
 
 - Extract full paragraphs from the transcript (not truncated sentences).
-- If the transcript includes timestamps, record the timestamp at the start of the paragraph (or a range if obvious).
-- If speaker names are marked (e.g., “CEO:”, “CFO:”, “Analyst:”), capture the speaker role.
-- If the transcript has obvious sections (“Prepared Remarks”, “Q&A”), capture the section name.
-
-If some metadata is not available in the text, set it to null.
+- If some metadata is not available in the text, set it to null.
 
 Passage:
 \"\"\"{passage}\"\"\"""").strip()
@@ -379,6 +392,69 @@ Passage:
     except Exception:
         return Excerpt(paragraph_text="", speaker="", section=None, timestamp=None, raw_keywords_detected=[], labels=[], notes="")
 
+
+@async_retry()
+async def extract_att(passage: str) -> Excerpt:
+    """Return representative quotes and summaries for passages about data/AI."""
+    analyst_instructions = """You are analyzing transcripts (e.g., earnings calls, investor presentations, interviews) to identify and classify paragraphs related to mobile SDKs, data infrastructure, third-party measurement, and Apple’s iOS privacy changes (ATT/IDFA).
+
+Your task is to:
+- identify relevant paragraphs using the relevance criteria below,
+- extract those paragraphs in full,
+- assign appropriate classification labels (multi-label allowed),
+- and capture structured metadata when available.
+
+Be precise and consistent. Do not infer information that is not explicitly or clearly implied in the text."""
+
+    user_prompt = textwrap.dedent(
+        f"""For each extracted paragraph, assign one or more of the following labels (multi-label is allowed):
+
+Use these exact words for label: ["ATT Impact – Direct (Signal/Measurement)", "ATT Impact – Financial"]
+
+### 1. ATT Impact – Direct (Signal/Measurement)
+Use when the paragraph links ATT/IDFA/iOS privacy changes to:
+- reduced accuracy of measurement or targeting,
+- “signal loss,” fewer attribution signals,
+- inability to track or attribute users/campaigns,
+- degraded optimization, difficulties in campaign performance measurement.
+
+This label focuses on information / measurement / optimization consequences.
+
+### 2. ATT Impact – Financial
+Use when the paragraph links ATT/IDFA/iOS privacy changes to financial outcomes, e.g.:
+- lower ad revenue, weaker ROAS, higher customer acquisition cost,
+- missed guidance or forecast revisions,
+- explicit revenue or profit shortfalls attributed to privacy changes.
+
+This label focuses on earnings, revenue, margins, or guidance effects.
+
+If a paragraph is clearly relevant but doesn’t fit any of these, you may assign no label (empty list), but that should be rare. Prefer to use all applicable labels.
+
+---
+
+## 3. How to segment and capture metadata
+
+- Extract full paragraphs from the transcript (not truncated sentences).
+- If some metadata is not available in the text, set it to null. 
+
+Passage:
+\"\"\"{passage}\"\"\"""").strip()
+
+    try:
+        response = await client.responses.parse(
+            model="gpt-5-mini",
+            instructions=analyst_instructions,
+            reasoning={"effort": "medium"},
+            text={"verbosity": "high"},
+            input=[
+                {"role": "user", "content": user_prompt},
+            ],
+            text_format=Excerpt,
+        )
+        return response.output_parsed
+
+    except Exception:
+        return Excerpt(paragraph_text="", speaker="", section=None, timestamp=None, raw_keywords_detected=[], labels=[], notes="")
 
 # ----------------------------
 # Helper
@@ -403,13 +479,9 @@ def format_quotes(quotes: List[str]) -> str:
 async def process_row(row: pd.Series) -> LLMAnnotation:
     """Run classification and extraction (if appropriate) for a single dataframe row."""
     annotation = LLMAnnotation()
-
     passage = str(row.get("componenttext", "") or "")
+
     #classification = detect_data_or_ai(passage)
-
-    data_or_sdk_relevancy = await detect_sdk_or_data(passage)
-    annotation.is_sdk_or_data = data_or_sdk_relevancy
-
     # if classification == 1:
     #     annotation.is_data_or_ai
     #     extraction = extract(passage)
@@ -417,16 +489,23 @@ async def process_row(row: pd.Series) -> LLMAnnotation:
     #     formatted_quantitative = format_quotes(extraction.quantitative_summary)
     #     formatted_qualitative = format_quotes(extraction.qualitative_summary)
 
+    data_or_sdk_relevancy = await detect_sdk_or_data(passage)
+    annotation.is_sdk_or_data = data_or_sdk_relevancy
     if data_or_sdk_relevancy == 1:
         excerpt_data_or_sdk_extraction = await extract_data_or_sdk(passage)
         annotation.excerpt_data_or_sdk_extraction = excerpt_data_or_sdk_extraction
+
+    att_relevancy = await detect_att(passage)
+    annotation.is_att = att_relevancy
+    if att_relevancy == 1:
+        excerpt_att_extraction = await extract_att(passage)
+        annotation.excerpt_att_extraction = excerpt_att_extraction
 
     return annotation
 
 async def sem_process_row(row):
     async with sem:
         return await process_row(row)
-
 
 # ----------------------------
 # Run all rows
@@ -457,8 +536,8 @@ async def run_all(df):
         # df.at[idx, "representative_quotes"] = annotation.representative_quotes
         # df.at[idx, "quantitative_summary"] = annotation.quantitative_summary
         # df.at[idx, "qualitative_summary"] = annotation.qualitative_summary
-        df.at[idx, "is_sdk_or_data"] = annotation.is_sdk_or_data
 
+        df.at[idx, "is_sdk_or_data"] = annotation.is_sdk_or_data
         if annotation.is_sdk_or_data != 0:
             df.at[idx, "excerpt_data_or_sdk_extraction_json"] = (
                 annotation.excerpt_data_or_sdk_extraction.model_dump_json()
@@ -466,10 +545,24 @@ async def run_all(df):
         else:
             df.at[idx, "excerpt_data_or_sdk_extraction_json"] = None
 
+        df.at[idx, "is_att"] = annotation.is_att
+        if annotation.is_att != 0:
+            df.at[idx, "excerpt_att_extraction_json"] = (
+                annotation.excerpt_att_extraction.model_dump_json()
+            )
+        else:
+            df.at[idx, "excerpt_att_extraction_json"] = None
+
         if completed_count % 100 == 0:
             output_filename = time_now.strftime("processed_transcripts_%Y%m%d_%H%M%S.csv")
             output_path = f"output/{output_filename}"
             df.to_csv(output_path, index=False)
+
+    # Final Save
+    final_filename = time_now.strftime("processed_transcripts_FINAL_%Y%m%d_%H%M%S.csv")
+    final_path = f"output/{final_filename}"
+    df.to_csv(final_path, index=False)
+    logging.info("Final file saved to %s", final_path)
 
     await client.close()
 
@@ -488,7 +581,9 @@ def load_dataframe(filename: str) -> pd.DataFrame:
         "quantitative_summary",
         "qualitative_summary",
         "is_sdk_or_data",
-        "excerpt_data_or_sdk_extraction_json"
+        "excerpt_data_or_sdk_extraction_json",
+        "is_att",
+        "excerpt_att_extraction_json"
     ]
     processed_df[cols] = None
 
