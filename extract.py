@@ -338,7 +338,7 @@ Passage:
 @async_retry()
 async def extract_data_or_sdk(passage: str) -> Excerpt:
     """Return representative quotes and summaries for passages about data/AI."""
-    analyst_instructions = """You are analyzing transcripts (e.g., earnings calls, investor presentations, interviews) to identify and classify paragraphs related to mobile SDKs, data infrastructure, third-party measurement, and Apple’s iOS privacy changes (ATT/IDFA).
+    analyst_instructions = """You are analyzing transcripts (e.g., earnings calls, investor presentations, interviews) to identify and classify paragraphs related to mobile SDKs, data infrastructure, third-party measurement.
 
 Your task is to:
 - identify relevant paragraphs using the relevance criteria below,
@@ -396,7 +396,7 @@ Passage:
 @async_retry()
 async def extract_att(passage: str) -> Excerpt:
     """Return representative quotes and summaries for passages about data/AI."""
-    analyst_instructions = """You are analyzing transcripts (e.g., earnings calls, investor presentations, interviews) to identify and classify paragraphs related to mobile SDKs, data infrastructure, third-party measurement, and Apple’s iOS privacy changes (ATT/IDFA).
+    analyst_instructions = """You are analyzing transcripts (e.g., earnings calls, investor presentations, interviews) to identify and classify paragraphs related to Apple’s iOS privacy changes (ATT/IDFA).
 
 Your task is to:
 - identify relevant paragraphs using the relevance criteria below,
@@ -576,15 +576,23 @@ def load_dataframe(filename: str) -> pd.DataFrame:
 
     processed_df = df.copy()
     cols = [
-        "is_data_or_ai",
-        "representative_quotes",
-        "quantitative_summary",
-        "qualitative_summary",
         "is_sdk_or_data",
         "excerpt_data_or_sdk_extraction_json",
         "is_att",
         "excerpt_att_extraction_json"
     ]
+
+    # cols = [
+    #     "is_data_or_ai",
+    #     "representative_quotes",
+    #     "quantitative_summary",
+    #     "qualitative_summary",
+    #     "is_sdk_or_data",
+    #     "excerpt_data_or_sdk_extraction_json",
+    #     "is_att",
+    #     "excerpt_att_extraction_json"
+    # ]
+
     processed_df[cols] = None
 
     return processed_df
