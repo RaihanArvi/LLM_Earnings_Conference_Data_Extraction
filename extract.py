@@ -97,7 +97,7 @@ class LLMAnnotation(BaseModel):
     )
     is_att: Optional[int] = Field(
         default=None,
-        description="Indicates whether the content relates to data or AI"
+        description="Indicates whether the content relates to ATT Impact"
     )
     representative_quotes: Optional[str] = Field(
         default=None,
@@ -113,11 +113,11 @@ class LLMAnnotation(BaseModel):
     )
     excerpt_data_or_sdk_extraction: Optional[Excerpt] = Field(
         default=None,
-        description="Extracted excerpt from the transcript"
+        description="Extracted excerpt from the transcript that is relevant to data or SDK"
     )
     excerpt_att_extraction: Optional[Excerpt] = Field(
         default=None,
-        description="Extracted excerpt from the transcript"
+        description="Extracted excerpt from the transcript that is relevant to ATT Impact"
     )
 
 
@@ -572,7 +572,7 @@ async def run_all(df):
 # ----------------------------
 def load_dataframe(filename: str) -> pd.DataFrame:
     df = pd.read_csv(filename)
-    df = df.iloc[0:100]
+    df = df.iloc[0:5000]
 
     processed_df = df.copy()
     cols = [
